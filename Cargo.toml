@@ -2,6 +2,16 @@
 name = "vnquant-dataset"
 version = "0.1.0"
 edition = "2024"
+description = "A Rust library for handling VNQuant datasets, providing efficient data structures and serialization."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bitbytelabio/vnquant-dataset"
+authors = [
+    "Nguyen Thanh Dat <dat.nguyen@bitbytelab.io>",
+    "Nguyen Tien Dat <dat.t.nguyen@bitbytelab.io>",
+]
+resolver = "2"
+readme = "README.md"
+keywords = ["vnquant", "dataset", "rust", "data", "serialization"]
 
 [lib]
 name = "vnquant_dataset"
@@ -12,6 +22,7 @@ anyhow = "1.0.98"
 arrow = { version = "55.1.0", features = ["ipc_compression", "chrono-tz"] }
 bincode = { version = "2.0.1", features = ["serde"] }
 bon = "3.6.4"
+chrono = { version = "0.4.41", features = ["serde"] }
 ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
 parquet = "55.1.0"
 parquet_derive = "55.1.0"
@@ -23,8 +34,16 @@ pyo3 = { version = "0.25.1", features = [
 ] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+sqlx = { version = "0.8.6", features = [
+    "chrono",
+    "derive",
+    "json",
+    "macros",
+    "sqlite",
+    "runtime-tokio-rustls",
+] }
 tokio = { version = "1.45.1", features = ["full"] }
 
 
 tradingview-rs = "0.0.4"
-vnquant-ta = { git = "https://github.com/bitbytelabio/vnquant-ta.git", branch = "dev" }
+yata = { git = "https://github.com/bitbytelabio/yata.git" }
