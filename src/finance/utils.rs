@@ -102,6 +102,7 @@ pub async fn fetch_prices_batch_stream(
             let data_clone = chart_data.data.clone();
 
             async move {
+                db_clone.update_ticker(&symbol_info).await?;
                 db_clone
                     .upsert_prices(&symbol_info, interval, &data_clone)
                     .await
@@ -114,21 +115,7 @@ pub async fn fetch_prices_batch_stream(
     Ok(())
 }
 
-pub async fn fetch_prices_all_tickers(db: Database, interval: Interval) -> anyhow::Result<()> {
-    // Fetch all tickers from the database
-    let tickers = db.get_all_tickers().await?;
-    if tickers.is_empty() {
-        tracing::warn!("No tickers found in the database");
-        return Ok(());
-    }
-
-    // Fetch prices for all tickers in batches
-    fetch_prices_batch_stream(&db, &tickers, interval).await?;
-
-    Ok(())
-}
-
-pub async fn fetch_prices_all_tickers_chunked_with_retry(
+pub async fn fetch_prices_all(
     db: Database,
     interval: Interval,
     chunk_size: usize,
@@ -230,6 +217,93 @@ pub async fn fetch_prices_all_tickers_chunked_with_retry(
             "{} chunks failed to process",
             failed_chunks
         ));
+    }
+
+    Ok(())
+}
+
+pub async fn fetch_intraday_prices_all(
+    db: &Database,
+    interval: Interval,
+    concurrency: usize,
+) -> anyhow::Result<()> {
+    let tickers = db.get_all_tickers().await?;
+    if tickers.is_empty() {
+        tracing::warn!("No tickers found in the database");
+        return Ok(());
+    }
+
+    let total_tickers = tickers.len();
+    let progress_interval = std::cmp::max(total_tickers / 20, 1); // Report progress every 5%
+
+    tracing::info!(
+        "Starting intraday price fetch for {} tickers with concurrency {}",
+        total_tickers,
+        concurrency
+    );
+
+    let mut processed = 0;
+    let mut successful = 0;
+    let mut failed_tickers = Vec::new();
+
+    let results = stream::iter(tickers)
+        .enumerate()
+        .map(|(idx, ticker)| {
+            let db_clone = db.clone();
+            async move {
+                let result = fetch_prices(db_clone, &ticker, interval, true).await;
+                (idx, ticker, result)
+            }
+        })
+        .buffer_unordered(concurrency)
+        .collect::<Vec<_>>()
+        .await;
+
+    for (_idx, ticker, result) in results {
+        processed += 1;
+
+        match result {
+            Ok(_) => {
+                successful += 1;
+                if processed % progress_interval == 0 || processed == total_tickers {
+                    tracing::info!(
+                        "Progress: {}/{} processed ({:.1}%), {} successful",
+                        processed,
+                        total_tickers,
+                        (processed as f64 / total_tickers as f64) * 100.0,
+                        successful
+                    );
+                }
+            }
+            Err(e) => {
+                failed_tickers.push(format!("{}:{} - {}", ticker.symbol, ticker.exchange, e));
+                tracing::warn!(
+                    "Failed to fetch prices for {}:{}: {}",
+                    ticker.symbol,
+                    ticker.exchange,
+                    e
+                );
+            }
+        }
+    }
+
+    let failed_count = failed_tickers.len();
+    tracing::info!(
+        "Intraday processing completed: {}/{} successful ({:.1}% success rate)",
+        successful,
+        total_tickers,
+        (successful as f64 / total_tickers as f64) * 100.0
+    );
+
+    if failed_count > 0 {
+        tracing::warn!("Failed {} tickers:", failed_count);
+        for failure in failed_tickers.iter().take(10) {
+            // Show first 10 failures
+            tracing::warn!("  {}", failure);
+        }
+        if failed_count > 10 {
+            tracing::warn!("  ... and {} more", failed_count - 10);
+        }
     }
 
     Ok(())

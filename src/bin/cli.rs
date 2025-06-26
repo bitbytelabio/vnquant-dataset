@@ -4,7 +4,7 @@ use tradingview::Interval;
 use vnquant_dataset::finance::{
     db::Database,
     models::Ticker,
-    utils::{fetch_prices, fetch_prices_all_tickers_chunked_with_retry, fetch_tickers},
+    utils::{fetch_intraday_prices_all, fetch_prices, fetch_prices_all, fetch_tickers},
 };
 
 #[derive(Parser)]
@@ -68,6 +68,24 @@ enum Commands {
         /// Time interval for price data
         #[arg(short, long, value_enum, default_value = "one-day")]
         interval: IntervalArg,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Fetch intraday prices for all tickers in the database
+    FetchIntradayPricesAll {
+        /// Database URL (can also be set via DATABASE_URL environment variable)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
+
+        /// Time interval for price data
+        #[arg(short, long, value_enum, default_value = "one-hour")]
+        interval: IntervalArg,
+
+        /// Number of concurrent requests
+        #[arg(short, long, default_value = "5")]
+        concurrency: usize,
 
         /// Enable verbose logging
         #[arg(short, long)]
@@ -182,7 +200,7 @@ async fn main() -> Result<()> {
             );
             let start = std::time::Instant::now();
 
-            fetch_prices_all_tickers_chunked_with_retry(db, interval.into(), 100, 2).await?;
+            fetch_prices_all(db, interval.into(), 100, 2).await?;
 
             let duration = start.elapsed();
             println!(
@@ -306,6 +324,39 @@ async fn main() -> Result<()> {
                     println!("Ticker '{}' not found on exchange '{}'", symbol, exchange);
                 }
             }
+        }
+
+        Commands::FetchIntradayPricesAll {
+            database_url,
+            interval,
+            concurrency,
+            verbose,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            println!("🔄 Connecting to database...");
+            let db = Database::new(&database_url).await?;
+
+            println!(
+                "📊 Fetching intraday prices for all tickers with interval {:?} (concurrency: {})...",
+                interval, concurrency
+            );
+            let start = std::time::Instant::now();
+
+            fetch_intraday_prices_all(&db, interval.into(), concurrency).await?;
+
+            let duration = start.elapsed();
+            println!(
+                "✅ Successfully fetched intraday prices for all tickers in {:.2}s!",
+                duration.as_secs_f64()
+            );
         }
     }
 
