@@ -35,54 +35,28 @@ impl Database {
     }
 
     pub async fn get_ticker_by_symbol(&self, symbol: &str) -> Result<Option<Ticker>> {
-        let row = sqlx::query!(
-            "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded, created_at, updated_at FROM TICKERS WHERE symbol = ?",
+        let row = sqlx::query_as!(
+            Ticker,
+            "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded FROM TICKERS WHERE symbol = ?",
             symbol
         )
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some(row) = row {
-            Ok(Some(Ticker {
-                symbol: row.symbol,
-                exchange: row.exchange,
-                description: row.description,
-                currency: row.currency,
-                country: row.country,
-                market_type: row.market_type,
-                industry: row.industry,
-                sector: row.sector,
-                founded: row.founded,
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row)
     }
 
     pub async fn get_ticker(&self, symbol: &str, exchange: &str) -> Result<Option<Ticker>> {
-        let row = sqlx::query!(
-            "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded, created_at, updated_at FROM TICKERS WHERE symbol = ? AND exchange = ?",
+        let row = sqlx::query_as!(
+            Ticker,
+            "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded FROM TICKERS WHERE symbol = ? AND exchange = ?",
             symbol,
             exchange
         )
         .fetch_optional(&self.pool)
         .await?;
 
-        if let Some(row) = row {
-            Ok(Some(Ticker {
-                symbol: row.symbol,
-                exchange: row.exchange,
-                description: row.description,
-                currency: row.currency,
-                country: row.country,
-                market_type: row.market_type,
-                industry: row.industry,
-                sector: row.sector,
-                founded: row.founded,
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(row)
     }
 
     pub async fn get_all_tickers(&self) -> Result<Vec<Ticker>> {
@@ -111,27 +85,13 @@ impl Database {
     }
 
     pub async fn get_tickers_by_exchange(&self, exchange: &str) -> Result<Vec<Ticker>> {
-        let rows = sqlx::query!(
+        let tickers = sqlx::query_as!(
+            Ticker,
             "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded FROM TICKERS WHERE exchange = ? ORDER BY symbol",
             exchange
         )
         .fetch_all(&self.pool)
         .await?;
-
-        let tickers = rows
-            .into_iter()
-            .map(|row| Ticker {
-                symbol: row.symbol,
-                exchange: row.exchange,
-                description: row.description,
-                currency: row.currency,
-                country: row.country,
-                market_type: row.market_type,
-                industry: row.industry,
-                sector: row.sector,
-                founded: row.founded,
-            })
-            .collect();
 
         Ok(tickers)
     }
@@ -149,7 +109,7 @@ impl Database {
     }
 
     // Improved INSERT with upsert capability
-    pub async fn update_ticker(&self, ticker: &SymbolInfo) -> Result<()> {
+    pub async fn upser_ticker(&self, ticker: &SymbolInfo) -> Result<()> {
         let ticker = Ticker {
             symbol: ticker.symbol().to_string(),
             exchange: ticker.exchange().to_string(),
@@ -426,4 +386,116 @@ impl Database {
 
         Ok(candles)
     }
+    pub async fn search_tickers(&self, query: &str, limit: Option<i64>) -> Result<Vec<Ticker>> {
+        let limit = limit.unwrap_or(50);
+        
+        let tickers = sqlx::query_as!(
+            Ticker,
+            r#"
+            SELECT t.symbol, t.exchange, t.description, t.currency, t.country, 
+                   t.market_type, t.industry, t.sector, t.founded
+            FROM tickers_fts 
+            JOIN TICKERS t ON tickers_fts.rowid = t.rowid
+            WHERE tickers_fts MATCH ?
+            ORDER BY bm25(tickers_fts)
+            LIMIT ?
+            "#,
+            query,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+
+        Ok(tickers)
+    }
+
+    /// Search tickers with additional filtering by exchange
+    pub async fn search_tickers_by_exchange(
+        &self, 
+        query: &str, 
+        exchange: &str, 
+        limit: Option<i64>
+    ) -> Result<Vec<Ticker>> {
+        let limit = limit.unwrap_or(50);
+        
+        let rows = sqlx::query_as!(
+            Ticker,
+            r#"
+            SELECT t.symbol, t.exchange, t.description, t.currency, t.country, 
+                   t.market_type, t.industry, t.sector, t.founded
+            FROM tickers_fts 
+            JOIN TICKERS t ON tickers_fts.rowid = t.rowid
+            WHERE tickers_fts MATCH ? AND t.exchange = ?
+            ORDER BY bm25(tickers_fts)
+            LIMIT ?
+            "#,
+            query,
+            exchange,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+    
+        Ok(rows)
+    }
+
+    /// Search tickers by specific field (symbol, description, industry, or sector)
+    pub async fn search_tickers_by_field(
+        &self, 
+        field: &str, 
+        query: &str, 
+        limit: Option<i64>
+    ) -> Result<Vec<Ticker>> {
+        let limit = limit.unwrap_or(50);
+        
+        // Validate field name to prevent SQL injection
+        let valid_fields = ["symbol", "description", "industry", "sector"];
+        if !valid_fields.contains(&field) {
+            return Err(anyhow::anyhow!("Invalid field name: {}", field));
+        }
+
+        let search_query = format!("{}: {}", field, query);
+        
+        let rows = sqlx::query_as!(
+            Ticker,
+            r#"
+            SELECT t.symbol, t.exchange, t.description, t.currency, t.country, 
+                   t.market_type, t.industry, t.sector, t.founded
+            FROM tickers_fts 
+            JOIN TICKERS t ON tickers_fts.rowid = t.rowid
+            WHERE tickers_fts MATCH ?
+            ORDER BY bm25(tickers_fts)
+            LIMIT ?
+            "#,
+            search_query,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+
+    /// Rebuild the FTS index (useful for maintenance)
+    pub async fn rebuild_search_index(&self) -> Result<()> {
+        // Clear existing FTS data
+        sqlx::query("DELETE FROM tickers_fts").execute(&self.pool).await?;
+        
+        // Repopulate FTS table
+        sqlx::query!(
+            "INSERT INTO tickers_fts(symbol, description, industry, sector) SELECT symbol, description, industry, sector FROM TICKERS"
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Optimize the FTS index
+        sqlx::query("INSERT INTO tickers_fts(tickers_fts) VALUES('optimize')")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
 }

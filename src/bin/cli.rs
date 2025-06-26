@@ -2,12 +2,12 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use tradingview::{Interval, UserCookies, get_quote_token};
 use vnquant_dataset::finance::{
-    db::Database,
-    models::Ticker,
-    utils::{
+    cmd::{
         fetch_intraday_prices, fetch_intraday_prices_all, fetch_prices, fetch_prices_all,
         fetch_tickers,
     },
+    db::Database,
+    models::Ticker,
 };
 
 #[derive(Parser)]

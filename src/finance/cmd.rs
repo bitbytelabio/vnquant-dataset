@@ -118,7 +118,7 @@ pub async fn fetch_prices_batch(
             let data_clone = chart_data.data.clone();
 
             async move {
-                db_clone.update_ticker(&symbol_info).await?;
+                db_clone.upser_ticker(&symbol_info).await?;
                 db_clone
                     .upsert_prices(&symbol_info, interval, &data_clone)
                     .await
