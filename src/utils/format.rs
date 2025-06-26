@@ -1,8 +1,11 @@
 use crate::finance::models::Ticker;
+use arrow::array::*;
 use arrow::{
     array::{ArrayRef, Int64Array, RecordBatch, StringArray},
     datatypes::{DataType, Field, Schema, SchemaRef},
 };
+use parquet::arrow::ArrowWriter;
+use std::fs::File;
 use std::sync::Arc;
 
 pub fn ticker_schema() -> SchemaRef {
@@ -120,9 +123,6 @@ pub fn save_parquet_batched(
     path: &str,
     batch_size: usize,
 ) -> anyhow::Result<()> {
-    use parquet::arrow::ArrowWriter;
-    use std::fs::File;
-
     if tickers.is_empty() {
         return Ok(());
     }
@@ -141,8 +141,6 @@ pub fn save_parquet_batched(
 }
 
 pub fn from_batch(batch: &RecordBatch) -> anyhow::Result<Vec<Ticker>> {
-    use arrow::array::*;
-
     let symbols = batch
         .column(0)
         .as_any()
