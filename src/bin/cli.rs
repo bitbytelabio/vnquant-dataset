@@ -1,6 +1,11 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use vnquant_dataset::finance::{db::Database, utils::fetch_tickers};
+use clap::{Parser, Subcommand, ValueEnum};
+use tradingview::Interval;
+use vnquant_dataset::finance::{
+    db::Database,
+    models::Ticker,
+    utils::{fetch_prices, fetch_prices_all_tickers_chunked_with_retry, fetch_tickers},
+};
 
 #[derive(Parser)]
 #[command(name = "vnquant")]
@@ -11,6 +16,37 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Clone, ValueEnum, Debug)]
+enum IntervalArg {
+    OneMinute,
+    FiveMinutes,
+    FifteenMinutes,
+    ThirtyMinutes,
+    OneHour,
+    TwoHours,
+    FourHours,
+    OneDay,
+    OneWeek,
+    OneMonth,
+}
+
+impl From<IntervalArg> for Interval {
+    fn from(interval: IntervalArg) -> Self {
+        match interval {
+            IntervalArg::OneMinute => Interval::OneMinute,
+            IntervalArg::FiveMinutes => Interval::FiveMinutes,
+            IntervalArg::FifteenMinutes => Interval::FifteenMinutes,
+            IntervalArg::ThirtyMinutes => Interval::ThirtyMinutes,
+            IntervalArg::OneHour => Interval::OneHour,
+            IntervalArg::TwoHours => Interval::TwoHours,
+            IntervalArg::FourHours => Interval::FourHours,
+            IntervalArg::OneDay => Interval::OneDay,
+            IntervalArg::OneWeek => Interval::OneWeek,
+            IntervalArg::OneMonth => Interval::OneMonth,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Fetch tickers from TradingView exchanges
@@ -18,6 +54,46 @@ enum Commands {
         /// Database URL (can also be set via DATABASE_URL environment variable)
         #[arg(long, env = "DATABASE_URL")]
         database_url: String,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Fetch prices for all tickers in the database
+    FetchPricesAll {
+        /// Database URL (can also be set via DATABASE_URL environment variable)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
+
+        /// Time interval for price data
+        #[arg(short, long, value_enum, default_value = "one-day")]
+        interval: IntervalArg,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Fetch prices for a specific ticker
+    FetchPrices {
+        /// Database URL (can also be set via DATABASE_URL environment variable)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
+
+        /// Ticker symbol
+        #[arg(short, long)]
+        symbol: String,
+
+        /// Exchange name
+        #[arg(short, long)]
+        exchange: String,
+
+        /// Time interval for price data
+        #[arg(short, long, value_enum, default_value = "one-day")]
+        interval: IntervalArg,
+
+        /// Enable replay mode
+        #[arg(short, long)]
+        replay: bool,
 
         /// Enable verbose logging
         #[arg(short, long)]
@@ -81,6 +157,80 @@ async fn main() -> Result<()> {
             fetch_tickers(db).await?;
 
             println!("✅ Successfully fetched and stored tickers!");
+        }
+
+        Commands::FetchPricesAll {
+            database_url,
+            interval,
+            verbose,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            println!("🔄 Connecting to database...");
+            let db = Database::new(&database_url).await?;
+
+            println!(
+                "📊 Fetching prices for all tickers with interval {:?}...",
+                interval
+            );
+            let start = std::time::Instant::now();
+
+            fetch_prices_all_tickers_chunked_with_retry(db, interval.into(), 100, 2).await?;
+
+            let duration = start.elapsed();
+            println!(
+                "✅ Successfully fetched prices for all tickers in {:.2}s!",
+                duration.as_secs_f64()
+            );
+        }
+
+        Commands::FetchPrices {
+            database_url,
+            symbol,
+            exchange,
+            interval,
+            replay,
+            verbose,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            println!("🔄 Connecting to database...");
+            let db = Database::new(&database_url).await?;
+
+            let ticker = Ticker::builder()
+                .symbol(symbol.clone())
+                .exchange(exchange.clone())
+                .build();
+
+            println!(
+                "📊 Fetching prices for {}:{} with interval {:?}...",
+                symbol, exchange, interval
+            );
+            let start = std::time::Instant::now();
+
+            fetch_prices(db, &ticker, interval.into(), replay).await?;
+
+            let duration = start.elapsed();
+            println!(
+                "✅ Successfully fetched prices for {}:{} in {:.2}s!",
+                symbol,
+                exchange,
+                duration.as_secs_f64()
+            );
         }
 
         Commands::ListTickers {

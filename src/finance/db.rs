@@ -293,17 +293,69 @@ impl Database {
         if prices.is_empty() {
             return Ok(0);
         }
-
+    
+        // Filter out invalid OHLCV data before inserting
+        let valid_prices: Vec<_> = prices
+            .iter()
+            .filter(|price| {
+                // Check for null/invalid values
+                let open = price.open();
+                let high = price.high();
+                let low = price.low();
+                let close = price.close();
+                let volume = price.volume();
+                
+                // Filter out records with null, zero, or negative OHLC values
+                let is_valid = !open.is_nan() && !open.is_infinite() && open > 0.0
+                    && !high.is_nan() && !high.is_infinite() && high > 0.0
+                    && !low.is_nan() && !low.is_infinite() && low > 0.0
+                    && !close.is_nan() && !close.is_infinite() && close > 0.0
+                    && !volume.is_nan() && !volume.is_infinite() && volume >= 0.0
+                    && high >= low // High should be >= low
+                    && high >= open && high >= close // High should be >= open and close
+                    && low <= open && low <= close; // Low should be <= open and close
+                
+                if !is_valid {
+                    tracing::debug!(
+                        "Filtering out invalid OHLCV data for {}:{} at {}: O={}, H={}, L={}, C={}, V={}",
+                        ticker.symbol(),
+                        ticker.exchange(),
+                        price.datetime(),
+                        open, high, low, close, volume
+                    );
+                }
+                
+                is_valid
+            })
+            .collect();
+    
+        if valid_prices.is_empty() {
+            tracing::warn!(
+                "No valid OHLCV data found for {}:{} after filtering", 
+                ticker.symbol(), 
+                ticker.exchange()
+            );
+            return Ok(0);
+        }
+    
+        tracing::debug!(
+            "Filtered {} invalid records, inserting {} valid records for {}:{}",
+            prices.len() - valid_prices.len(),
+            valid_prices.len(),
+            ticker.symbol(),
+            ticker.exchange()
+        );
+    
         const BATCH_SIZE: usize = 1000;
         let mut total_affected = 0u64;
-
-        for chunk in prices.chunks(BATCH_SIZE) {
+    
+        for chunk in valid_prices.chunks(BATCH_SIZE) {
             let mut tx = self.pool.begin().await?;
-
+    
             let mut query_builder = sqlx::QueryBuilder::new(
                 "INSERT OR REPLACE INTO OHLCV (symbol, exchange, interval, timestamp, open, high, low, close, volume) ",
             );
-
+    
             query_builder.push_values(chunk, |mut b, price| {
                 b.push_bind(ticker.symbol())
                     .push_bind(ticker.exchange())
@@ -315,14 +367,14 @@ impl Database {
                     .push_bind(price.close())
                     .push_bind(price.volume());
             });
-
+    
             let query = query_builder.build();
             let result = query.execute(&mut *tx).await?;
             total_affected += result.rows_affected();
-
+    
             tx.commit().await?;
         }
-
+    
         Ok(total_affected)
     }
 
