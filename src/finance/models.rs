@@ -14,34 +14,6 @@ pub struct Ticker {
     pub founded: Option<i64>,
 }
 
-#[bon::bon]
-impl Ticker {
-    #[builder]
-    pub fn new(
-        symbol: String,
-        exchange: String,
-        description: Option<String>,
-        currency: Option<String>,
-        country: Option<String>,
-        market_type: Option<String>,
-        industry: Option<String>,
-        sector: Option<String>,
-        founded: Option<i64>,
-    ) -> Self {
-        Self {
-            symbol,
-            exchange,
-            description,
-            currency,
-            country,
-            market_type,
-            industry,
-            sector,
-            founded,
-        }
-    }
-}
-
 impl From<tradingview::Symbol> for Ticker {
     fn from(symbol: tradingview::Symbol) -> Self {
         Self {
@@ -63,13 +35,7 @@ impl tradingview::MarketSymbol for Ticker {
         Self {
             symbol: symbol.into(),
             exchange: exchange.into(),
-            description: None,
-            currency: None,
-            country: None,
-            market_type: None,
-            industry: None,
-            sector: None,
-            founded: None,
+            ..Default::default()
         }
     }
 
@@ -107,6 +73,10 @@ pub struct Candle {
 }
 
 impl tradingview::OHLCV for Candle {
+    fn datetime(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+
     fn timestamp(&self) -> i64 {
         self.timestamp.timestamp_millis()
     }
@@ -129,10 +99,6 @@ impl tradingview::OHLCV for Candle {
 
     fn volume(&self) -> f64 {
         self.volume
-    }
-
-    fn datetime(&self) -> DateTime<Utc> {
-        self.timestamp
     }
 
     fn is_ohlcv(&self) -> bool {

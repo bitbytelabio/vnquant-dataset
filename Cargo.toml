@@ -20,15 +20,14 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0.98"
 arrow = { version = "55.1.0", features = ["ipc_compression", "chrono-tz"] }
-bincode = { version = "2.0.1", features = ["serde"] }
 bon = "3.6.4"
 chrono = { version = "0.4.41", features = ["serde"] }
 clap = { version = "4.5.40", features = ["derive", "env"] }
 dotenvy = "0.15.7"
 futures = "0.3.31"
 ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
-parquet = "55.1.0"
-parquet_derive = "55.1.0"
+parquet = "55.2.0"
+parquet_derive = "55.2.0"
 pyo3 = { version = "0.25.1", features = [
     "abi3-py313",
     "auto-initialize",

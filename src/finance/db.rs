@@ -205,26 +205,6 @@ impl Database {
         Ok(result.rows_affected())
     }
 
-    // Updated to use Ticker model for consistency
-    pub async fn update_ticker_info(&self, ticker: &Ticker) -> Result<bool> {
-        let result = sqlx::query!(
-            "UPDATE TICKERS SET description = ?, currency = ?, country = ?, market_type = ?, industry = ?, sector = ?, founded = ? WHERE symbol = ? AND exchange = ?",
-            ticker.description,
-            ticker.currency,
-            ticker.country,
-            ticker.market_type,
-            ticker.industry,
-            ticker.sector,
-            ticker.founded,
-            ticker.symbol,
-            ticker.exchange
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected() > 0)
-    }
-
     pub async fn get_ticker_count(&self) -> Result<i64> {
         let count = sqlx::query!("SELECT COUNT(*) as count FROM TICKERS")
             .fetch_one(&self.pool)

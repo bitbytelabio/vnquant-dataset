@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use tradingview::{Interval, UserCookies, get_quote_token};
+use tradingview::{Interval, MarketSymbol, UserCookies, get_quote_token};
 use vnquant_dataset::finance::{
     cmd::{
         fetch_intraday_prices, fetch_intraday_prices_all, fetch_prices, fetch_prices_all,
@@ -309,10 +309,7 @@ async fn main() -> Result<()> {
             println!("🔄 Connecting to database...");
             let db = Database::new(&database_url).await?;
 
-            let ticker = Ticker::builder()
-                .symbol(symbol.clone())
-                .exchange(exchange.clone())
-                .build();
+            let ticker = Ticker::new(&symbol, &exchange);
 
             println!("📊 Fetching prices for {symbol}:{exchange} with interval {interval:?}...");
             let start = std::time::Instant::now();
