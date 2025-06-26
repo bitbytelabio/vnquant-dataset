@@ -42,7 +42,7 @@ pub async fn fetch_tickers(db: Database) -> anyhow::Result<()> {
             exchange_config.country.as_deref().unwrap_or("N/A")
         );
 
-        tickers.extend(symbols.into_iter().map(|s| Ticker::from(s)));
+        tickers.extend(symbols.into_iter().map(Ticker::from));
     }
 
     db.upsert_tickers(&tickers).await?;
@@ -62,11 +62,12 @@ pub async fn fetch_prices(
     // Check if ticker already exists
     let existing_ticker = db.get_ticker(&ticker.symbol, &ticker.exchange).await?;
     if existing_ticker.is_none() {
-        return Err(anyhow::anyhow!(
-            "Ticker {} on exchange {} does not exist",
+        db.upsert_tickers(&[ticker.clone()]).await?;
+        tracing::info!(
+            "Inserted new ticker: {} on exchange: {}",
             ticker.symbol,
             ticker.exchange
-        ));
+        );
     }
 
     // Fetch historical prices
@@ -88,6 +89,21 @@ pub async fn fetch_prices_batch_stream(
     tickers: &[Ticker],
     interval: Interval,
 ) -> anyhow::Result<()> {
+    // Validate tickers
+    if tickers.is_empty() {
+        return Err(anyhow::anyhow!("No tickers provided for batch processing"));
+    }
+    for ticker in tickers {
+        if ticker.symbol.is_empty() || ticker.exchange.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Ticker symbol or exchange is empty for ticker: {:?}",
+                ticker
+            ));
+        }
+    }
+
+    db.upsert_tickers(tickers).await?;
+
     let data = history::batch::retrieve()
         .symbols(tickers)
         .interval(interval)
@@ -127,7 +143,7 @@ pub async fn fetch_prices_all(
         return Ok(());
     }
 
-    let total_chunks = (tickers.len() + chunk_size - 1) / chunk_size;
+    let total_chunks = tickers.len().div_ceil(chunk_size);
     let mut successful_chunks = 0;
     let mut failed_chunks = 0;
 
@@ -222,15 +238,17 @@ pub async fn fetch_prices_all(
     Ok(())
 }
 
-pub async fn fetch_intraday_prices_all(
+pub async fn fetch_intraday_prices(
     db: &Database,
+    tickers: &[Ticker],
     interval: Interval,
     concurrency: usize,
+    replay: bool,
+    update_existing: bool,
 ) -> anyhow::Result<()> {
-    let tickers = db.get_all_tickers().await?;
-    if tickers.is_empty() {
-        tracing::warn!("No tickers found in the database");
-        return Ok(());
+    if update_existing {
+        // Update existing tickers in the database
+        db.upsert_tickers(tickers).await?;
     }
 
     let total_tickers = tickers.len();
@@ -251,7 +269,7 @@ pub async fn fetch_intraday_prices_all(
         .map(|(idx, ticker)| {
             let db_clone = db.clone();
             async move {
-                let result = fetch_prices(db_clone, &ticker, interval, true).await;
+                let result = fetch_prices(db_clone, &ticker, interval, replay).await;
                 (idx, ticker, result)
             }
         })
@@ -305,6 +323,26 @@ pub async fn fetch_intraday_prices_all(
             tracing::warn!("  ... and {} more", failed_count - 10);
         }
     }
+    Ok(())
+}
+
+pub async fn fetch_intraday_prices_all(
+    db: &Database,
+    interval: Interval,
+    concurrency: usize,
+) -> anyhow::Result<()> {
+    let tickers = db.get_all_tickers().await?;
+    if tickers.is_empty() {
+        tracing::warn!("No tickers found in the database");
+        return Ok(());
+    }
+
+    fetch_intraday_prices(db, &tickers, interval, concurrency, true, true)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch intraday prices: {}", e);
+            e
+        })?;
 
     Ok(())
 }

@@ -4,7 +4,10 @@ use tradingview::{Interval, UserCookies, get_quote_token};
 use vnquant_dataset::finance::{
     db::Database,
     models::Ticker,
-    utils::{fetch_intraday_prices_all, fetch_prices, fetch_prices_all, fetch_tickers},
+    utils::{
+        fetch_intraday_prices, fetch_intraday_prices_all, fetch_prices, fetch_prices_all,
+        fetch_tickers,
+    },
 };
 
 #[derive(Parser)]
@@ -16,7 +19,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Clone, ValueEnum, Debug)]
+#[derive(Clone, ValueEnum, Debug, Copy)]
 enum IntervalArg {
     OneMinute,
     FiveMinutes,
@@ -49,6 +52,50 @@ impl From<IntervalArg> for Interval {
 
 #[derive(Subcommand)]
 enum Commands {
+    FetchPricesBatch {
+        /// Database URL (can also be set via DATABASE_URL environment variable)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
+
+        /// Path to file containing ticker symbols and exchanges
+        #[arg(short, long)]
+        input_file: String,
+
+        /// Time interval for price data
+        #[arg(short, long, value_enum, default_value = "one-day")]
+        interval: IntervalArg,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    FetchIntradayPrices {
+        /// Database URL (can also be set via DATABASE_URL environment variable)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: String,
+
+        /// Path to file containing ticker symbols and exchanges
+        #[arg(short, long)]
+        input_file: String,
+
+        /// Time interval for price data
+        #[arg(short, long, value_enum, default_value = "one-hour")]
+        interval: IntervalArg,
+
+        /// Number of concurrent requests
+        #[arg(short, long, default_value = "5")]
+        concurrency: usize,
+
+        #[arg(short, long, default_value = "false")]
+        replay: bool,
+
+        #[arg(short, long, default_value = "false")]
+        update_existing: bool,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
     GetToken {
         #[arg(env = "TV_COOKIES")]
         cookies: Option<String>,
@@ -204,7 +251,6 @@ async fn main() -> Result<()> {
 
             println!("✅ Successfully fetched and stored tickers!");
         }
-
         Commands::FetchPricesAll {
             database_url,
             interval,
@@ -222,10 +268,7 @@ async fn main() -> Result<()> {
             println!("🔄 Connecting to database...");
             let db = Database::new(&database_url).await?;
 
-            println!(
-                "📊 Fetching prices for all tickers with interval {:?}...",
-                interval
-            );
+            println!("📊 Fetching prices for all tickers with interval {interval:?}...");
             let start = std::time::Instant::now();
 
             fetch_prices_all(db, interval.into(), 100, 2).await?;
@@ -262,10 +305,7 @@ async fn main() -> Result<()> {
                 .exchange(exchange.clone())
                 .build();
 
-            println!(
-                "📊 Fetching prices for {}:{} with interval {:?}...",
-                symbol, exchange, interval
-            );
+            println!("📊 Fetching prices for {symbol}:{exchange} with interval {interval:?}...");
             let start = std::time::Instant::now();
 
             fetch_prices(db, &ticker, interval.into(), replay).await?;
@@ -345,11 +385,11 @@ async fn main() -> Result<()> {
                     println!("Industry: {}", ticker.industry.as_deref().unwrap_or("N/A"));
                     println!("Sector: {}", ticker.sector.as_deref().unwrap_or("N/A"));
                     if let Some(founded) = ticker.founded {
-                        println!("Founded: {}", founded);
+                        println!("Founded: {founded}");
                     }
                 }
                 None => {
-                    println!("Ticker '{}' not found on exchange '{}'", symbol, exchange);
+                    println!("Ticker '{symbol}' not found on exchange '{exchange}'");
                 }
             }
         }
@@ -373,8 +413,7 @@ async fn main() -> Result<()> {
             let db = Database::new(&database_url).await?;
 
             println!(
-                "📊 Fetching intraday prices for all tickers with interval {:?} (concurrency: {})...",
-                interval, concurrency
+                "📊 Fetching intraday prices for all tickers with interval {interval:?} (concurrency: {concurrency})..."
             );
             let start = std::time::Instant::now();
 
@@ -410,7 +449,7 @@ async fn main() -> Result<()> {
             serde_json::to_writer(std::fs::File::create(&cookies_path)?, &user)?;
 
             if verbose {
-                println!("🔐 Successfully logged in to TradingView as {}", username);
+                println!("🔐 Successfully logged in to TradingView as {username}");
                 println!(
                     "Cookies saved to {}",
                     std::fs::canonicalize(&cookies_path)?.display()
@@ -438,12 +477,93 @@ async fn main() -> Result<()> {
             let token = get_quote_token(&user).await?;
 
             // Print the auth token
-            println!("{}", token);
+            println!("{token}");
 
             // set TV_AUTH_TOKEN environment variable
             unsafe {
                 std::env::set_var("TV_AUTH_TOKEN", &token);
             }
+        }
+        Commands::FetchPricesBatch {
+            database_url,
+            input_file,
+            interval,
+            verbose,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            println!("🔄 Connecting to database...");
+            let db = Database::new(&database_url).await?;
+
+            println!("📊 Fetching prices for tickers from file: {input_file}");
+            let start = std::time::Instant::now();
+            let ticker_str = std::fs::read_to_string(input_file)?;
+            // Read tickers from input file
+            let tickers: Vec<Ticker> = serde_json::from_str(&ticker_str)?;
+            let len = tickers.len();
+
+            for ticker in tickers {
+                fetch_prices(db.clone(), &ticker, interval.into(), false).await?;
+            }
+
+            let duration = start.elapsed();
+            println!(
+                "✅ Successfully fetched prices for {} tickers in {:.2}s!",
+                len,
+                duration.as_secs_f64()
+            );
+        }
+        Commands::FetchIntradayPrices {
+            database_url,
+            input_file,
+            interval,
+            concurrency,
+            replay,
+            update_existing,
+            verbose,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            println!("🔄 Connecting to database...");
+            let db = Database::new(&database_url).await?;
+
+            println!("📊 Fetching intraday prices for tickers from file: {input_file}");
+            let start = std::time::Instant::now();
+            let ticker_str = std::fs::read_to_string(input_file)?;
+            // Read tickers from input file
+            let tickers: Vec<Ticker> = serde_json::from_str(&ticker_str)?;
+            let len = tickers.len();
+
+            fetch_intraday_prices(
+                &db,
+                &tickers,
+                interval.into(),
+                concurrency,
+                replay,
+                update_existing,
+            )
+            .await?;
+
+            let duration = start.elapsed();
+            println!(
+                "✅ Successfully fetched intraday prices for {} tickers in {:.2}s!",
+                len,
+                duration.as_secs_f64()
+            );
         }
     }
 

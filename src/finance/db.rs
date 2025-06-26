@@ -213,7 +213,7 @@ impl Database {
                     .push_bind(&ticker.market_type)
                     .push_bind(&ticker.industry)
                     .push_bind(&ticker.sector)
-                    .push_bind(&ticker.founded);
+                    .push_bind(ticker.founded);
             });
 
             query_builder.push(" ON CONFLICT(symbol, exchange) DO UPDATE SET ");
