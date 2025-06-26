@@ -1,12 +1,15 @@
 use crate::finance::models::*;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
+use tradingview::Interval;
 
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: SqlitePool,
 }
 
+#[bon::bon]
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = SqlitePool::connect(database_url).await?;
@@ -259,5 +262,111 @@ impl Database {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn get_ticker_count(&self) -> Result<i64> {
+        let count = sqlx::query!("SELECT COUNT(*) as count FROM TICKERS")
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(count.count)
+    }
+
+    pub async fn upsert_prices(
+        &self,
+        ticker: &Ticker,
+        interval: Interval,
+        prices: &[Candle],
+    ) -> Result<u64> {
+        if prices.is_empty() {
+            return Ok(0);
+        }
+
+        const BATCH_SIZE: usize = 1000;
+        let mut total_affected = 0u64;
+
+        for chunk in prices.chunks(BATCH_SIZE) {
+            let mut tx = self.pool.begin().await?;
+
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT INTO OHLCV (symbol, exchange, timestamp, open, high, low, close, volume) ",
+            );
+
+            query_builder.push_values(chunk, |mut b, price| {
+                b.push_bind(&ticker.symbol)
+                    .push_bind(&ticker.exchange)
+                    .push_bind(interval.to_string())
+                    .push_bind(price.timestamp)
+                    .push_bind(price.open)
+                    .push_bind(price.high)
+                    .push_bind(price.low)
+                    .push_bind(price.close)
+                    .push_bind(price.volume);
+            });
+
+            query_builder.push(" ON CONFLICT(symbol, exchange, timestamp) DO UPDATE SET ");
+            query_builder.push("open = excluded.open, ");
+            query_builder.push("high = excluded.high, ");
+            query_builder.push("low = excluded.low, ");
+            query_builder.push("close = excluded.close, ");
+            query_builder.push("volume = excluded.volume");
+
+            let query = query_builder.build();
+            let result = query.execute(&mut *tx).await?;
+            total_affected += result.rows_affected();
+
+            tx.commit().await?;
+        }
+
+        Ok(total_affected)
+    }
+
+    #[builder]
+    pub async fn get_prices(
+        &self,
+        ticker: &Ticker,
+        interval: Interval,
+        start: Option<DateTime<Utc>>,
+        end: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Candle>> {
+        let mut query = sqlx::QueryBuilder::new(
+            "SELECT timestamp, open, high, low, close, volume FROM OHLCV WHERE symbol = ",
+        );
+        query.push_bind(&ticker.symbol);
+        query.push(" AND exchange = ");
+        query.push_bind(&ticker.exchange);
+        query.push(" AND interval = ");
+        query.push_bind(interval.to_string());
+
+        if let Some(start_date) = start {
+            query.push(" AND timestamp >= ");
+            query.push_bind(start_date);
+        }
+
+        if let Some(end_date) = end {
+            query.push(" AND timestamp <= ");
+            query.push_bind(end_date);
+        }
+
+        query.push(" ORDER BY timestamp ASC");
+
+        let rows = query
+            .build_query_as::<(chrono::DateTime<Utc>, f64, f64, f64, f64, f64)>()
+            .fetch_all(&self.pool)
+            .await?;
+
+        let candles = rows
+            .into_iter()
+            .map(|row| Candle {
+                timestamp: row.0,
+                open: row.1,
+                high: row.2,
+                low: row.3,
+                close: row.4,
+                volume: row.5,
+            })
+            .collect();
+
+        Ok(candles)
     }
 }

@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tradingview::Interval;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Ticker {
@@ -33,9 +32,6 @@ impl From<tradingview::Symbol> for Ticker {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Candle {
-    pub symbol: String,
-    pub exchange: String,
-    pub interval: Interval,
     pub timestamp: DateTime<Utc>,
     pub open: f64,
     pub high: f64,
@@ -46,9 +42,6 @@ pub struct Candle {
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Indicator {
-    pub symbol: String,
-    pub exchange: String,
-    pub interval: Interval,
     pub timestamp: DateTime<Utc>,
     pub indicator_type: String,
     pub value: Option<f64>,
@@ -57,9 +50,6 @@ pub struct Indicator {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MlFeatures {
-    pub symbol: String,
-    pub exchange: String,
-    pub interval: Interval,
     pub timestamp: DateTime<Utc>,
     pub open: f64,
     pub high: f64,
