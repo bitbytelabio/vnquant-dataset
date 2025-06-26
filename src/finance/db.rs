@@ -109,26 +109,15 @@ impl Database {
     }
 
     // Improved INSERT with upsert capability
-    pub async fn upser_ticker(&self, ticker: &SymbolInfo) -> Result<()> {
-        let ticker = Ticker {
-            symbol: ticker.symbol().to_string(),
-            exchange: ticker.exchange().to_string(),
-            description: Some(ticker.description.clone()),
-            currency: Some(ticker.currency_code.clone()),
-            country: None, // Country is not available in SymbolInfo, need to update this later
-            market_type: Some(ticker.market_type.clone()),
-            industry: Some(ticker.industry.clone()),
-            sector: Some(ticker.sector.clone()),
-            founded: Some(ticker.founded.into()),
-        };
+    pub async fn upsert_ticker(&self, ticker: &SymbolInfo) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let result = sqlx::query!(
             "INSERT INTO TICKERS (symbol, exchange, description, currency, country, market_type, industry, sector, founded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol, exchange) DO UPDATE SET description = excluded.description, currency = excluded.currency, country = excluded.country, market_type = excluded.market_type, industry = excluded.industry, sector = excluded.sector, founded = excluded.founded",
-            ticker.symbol,
+            ticker.name,
             ticker.exchange,
             ticker.description,
-            ticker.currency,
-            ticker.country,
+            ticker.currency_code,
+            None::<String>,
             ticker.market_type,
             ticker.industry,
             ticker.sector,
@@ -140,7 +129,7 @@ impl Database {
 
         tracing::info!(
             "Upserted ticker {} on exchange {}: {} rows affected",
-            ticker.symbol,
+            ticker.symbol(),
             ticker.exchange,
             result.rows_affected()
         );
@@ -440,7 +429,6 @@ impl Database {
         Ok(rows)
     }
 
-    /// Search tickers by specific field (symbol, description, industry, or sector)
     pub async fn search_tickers_by_field(
         &self, 
         field: &str, 
@@ -449,12 +437,12 @@ impl Database {
     ) -> Result<Vec<Ticker>> {
         let limit = limit.unwrap_or(50);
         
-        // Validate field name to prevent SQL injection
-        let valid_fields = ["symbol", "description", "industry", "sector"];
+        // Validate field name to prevent SQL injection - now includes all columns
+        let valid_fields = ["symbol", "exchange", "description", "currency", "country", "market_type", "industry", "sector"];
         if !valid_fields.contains(&field) {
             return Err(anyhow::anyhow!("Invalid field name: {}", field));
         }
-
+    
         let search_query = format!("{}: {}", field, query);
         
         let rows = sqlx::query_as!(
@@ -473,28 +461,28 @@ impl Database {
         )
         .fetch_all(&self.pool)
         .await?;
-
+    
         Ok(rows)
     }
 
 
-    /// Rebuild the FTS index (useful for maintenance)
     pub async fn rebuild_search_index(&self) -> Result<()> {
         // Clear existing FTS data
         sqlx::query("DELETE FROM tickers_fts").execute(&self.pool).await?;
         
-        // Repopulate FTS table
+        // Repopulate FTS table with all searchable columns
         sqlx::query!(
-            "INSERT INTO tickers_fts(symbol, description, industry, sector) SELECT symbol, description, industry, sector FROM TICKERS"
+            "INSERT INTO tickers_fts(symbol, exchange, description, currency, country, market_type, industry, sector) 
+             SELECT symbol, exchange, description, currency, country, market_type, industry, sector FROM TICKERS"
         )
         .execute(&self.pool)
         .await?;
-
+    
         // Optimize the FTS index
         sqlx::query("INSERT INTO tickers_fts(tickers_fts) VALUES('optimize')")
             .execute(&self.pool)
             .await?;
-
+    
         Ok(())
     }
 

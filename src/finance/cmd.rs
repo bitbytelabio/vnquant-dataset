@@ -118,7 +118,7 @@ pub async fn fetch_prices_batch(
             let data_clone = chart_data.data.clone();
 
             async move {
-                db_clone.upser_ticker(&symbol_info).await?;
+                db_clone.upsert_ticker(&symbol_info).await?;
                 db_clone
                     .upsert_prices(&symbol_info, interval, &data_clone)
                     .await
@@ -345,4 +345,26 @@ pub async fn fetch_intraday_prices_all(
         })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::finance::db::Database;
+    #[tokio::test]
+    async fn test() -> anyhow::Result<()> {
+        let url = std::env::var("DATABASE_URL").unwrap_or("sqlite::memory:".to_string());
+        let db = Database::new(&url).await?;
+        let res = db
+            .search_tickers_by_field("market_type", "forex", None)
+            .await?;
+        println!("Found {} tickers", res.len());
+        for ticker in res {
+            println!(
+                "Ticker: {} - {} ({:?})",
+                ticker.symbol, ticker.exchange, ticker.market_type
+            );
+        }
+
+        Ok(())
+    }
 }
