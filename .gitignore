@@ -1,0 +1,17 @@
+/target
+*.lock
+.venv
+*.pyc
+__pycache__
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+*.log
+*.egg-info
+*.DS_Store
+*.coverage
+*.mypy_cache
+*.pytest_cache
+*.ipynb_checkpoints
+.env

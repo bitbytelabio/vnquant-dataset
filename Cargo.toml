@@ -1,0 +1,30 @@
+[package]
+name = "vnquant-dataset"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "vnquant_dataset"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.98"
+arrow = { version = "55.1.0", features = ["ipc_compression", "chrono-tz"] }
+bincode = { version = "2.0.1", features = ["serde"] }
+bon = "3.6.4"
+ndarray = { version = "0.16.1", features = ["rayon", "serde"] }
+parquet = "55.1.0"
+parquet_derive = "55.1.0"
+pyo3 = { version = "0.25.1", features = [
+    "abi3-py313",
+    "auto-initialize",
+    "full",
+    "generate-import-lib",
+] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.45.1", features = ["full"] }
+
+
+tradingview-rs = "0.0.4"
+vnquant-ta = { git = "https://github.com/bitbytelabio/vnquant-ta.git", branch = "dev" }
