@@ -1,0 +1,169 @@
+name: Data Loader
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC (after markets close)
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command to run"
+        required: true
+        default: "fetch-prices-all"
+        type: choice
+        options:
+          - fetch-tickers
+          - fetch-prices-all
+          - fetch-intraday-prices-all
+      interval:
+        description: "Price interval"
+        required: false
+        default: "one-day"
+        type: choice
+        options:
+          - one-minute
+          - five-minutes
+          - fifteen-minutes
+          - thirty-minutes
+          - one-hour
+          - two-hours
+          - four-hours
+          - one-day
+          - one-week
+          - one-month
+      concurrency:
+        description: "Concurrency level for intraday fetching"
+        required: false
+        default: "5"
+        type: string
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  download-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          lfs: true
+
+      - name: Setup Git LFS
+        run: |
+          git lfs install
+          git lfs pull
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build CLI tool
+        run: cargo build --release --bin cli
+
+      - name: Run scheduled data fetch (daily)
+        if: github.event_name == 'schedule'
+        run: |
+          echo "Running scheduled daily data fetch..."
+          ./target/release/cli fetch-prices-all --interval one-day --verbose
+
+      - name: Run manual data fetch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Running manual data fetch: ${{ github.event.inputs.command }}"
+          case "${{ github.event.inputs.command }}" in
+            "fetch-tickers")
+              ./target/release/cli fetch-tickers --verbose
+              ;;
+            "fetch-prices-all")
+              ./target/release/cli fetch-prices-all --interval ${{ github.event.inputs.interval }} --verbose
+              ;;
+            "fetch-intraday-prices-all")
+              ./target/release/cli fetch-intraday-prices-all --interval ${{ github.event.inputs.interval }} --concurrency ${{ github.event.inputs.concurrency }} --verbose
+              ;;
+            *)
+              echo "Unknown command: ${{ github.event.inputs.command }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Check for data changes
+        id: check_changes
+        run: |
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes detected"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure Git
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            commit_msg="📈 Daily data update - $timestamp"
+          else
+            commit_msg="📊 Manual data update (${{ github.event.inputs.command }}) - $timestamp"
+          fi
+
+          git add .
+          git commit -m "$commit_msg"
+          git push
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Data Loader Summary 📊" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "**Command:** ${{ github.event.inputs.command }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Interval:** ${{ github.event.inputs.interval }}" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ github.event.inputs.command }}" = "fetch-intraday-prices-all" ]; then
+              echo "**Concurrency:** ${{ github.event.inputs.concurrency }}" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Changes:** ${{ steps.check_changes.outputs.has_changes }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+  notify-on-failure:
+    runs-on: ubuntu-latest
+    needs: download-data
+    if: failure()
+
+    steps:
+      - name: Create failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 Data Loader Failed - ${new Date().toISOString().split('T')[0]}`;
+            const

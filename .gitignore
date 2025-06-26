@@ -1,5 +1,4 @@
 /target
-*.lock
 .venv
 *.pyc
 __pycache__
