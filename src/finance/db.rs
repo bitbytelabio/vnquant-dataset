@@ -2,7 +2,7 @@ use crate::finance::models::*;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
-use tradingview::Interval;
+use tradingview::{Interval, MarketSymbol, OHLCV, SymbolInfo};
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -149,18 +149,21 @@ impl Database {
     }
 
     // Improved INSERT with upsert capability
-    pub async fn insert_or_update_ticker(&self, ticker: &Ticker) -> Result<()> {
-        sqlx::query!(
-            "INSERT INTO TICKERS (symbol, exchange, description, currency, country, market_type, industry, sector, founded) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(symbol, exchange) DO UPDATE SET
-                description = excluded.description,
-                currency = excluded.currency,
-                country = excluded.country,
-                market_type = excluded.market_type,
-                industry = excluded.industry,
-                sector = excluded.sector,
-                founded = excluded.founded",
+    pub async fn update_ticker(&self, ticker: &SymbolInfo) -> Result<()> {
+        let ticker = Ticker {
+            symbol: ticker.symbol().to_string(),
+            exchange: ticker.exchange().to_string(),
+            description: Some(ticker.description.clone()),
+            currency: Some(ticker.currency_code.clone()),
+            country: None, // Country is not available in SymbolInfo, need to update this later
+            market_type: Some(ticker.market_type.clone()),
+            industry: Some(ticker.industry.clone()),
+            sector: Some(ticker.sector.clone()),
+            founded: Some(ticker.founded.into()),
+        };
+        let mut tx = self.pool.begin().await?;
+        let result = sqlx::query!(
+            "INSERT INTO TICKERS (symbol, exchange, description, currency, country, market_type, industry, sector, founded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol, exchange) DO UPDATE SET description = excluded.description, currency = excluded.currency, country = excluded.country, market_type = excluded.market_type, industry = excluded.industry, sector = excluded.sector, founded = excluded.founded",
             ticker.symbol,
             ticker.exchange,
             ticker.description,
@@ -171,8 +174,17 @@ impl Database {
             ticker.sector,
             ticker.founded
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
+
+        tracing::info!(
+            "Upserted ticker {} on exchange {}: {} rows affected",
+            ticker.symbol,
+            ticker.exchange,
+            result.rows_affected()
+        );
+
         Ok(())
     }
 
@@ -274,9 +286,9 @@ impl Database {
 
     pub async fn upsert_prices(
         &self,
-        ticker: &Ticker,
+        ticker: &impl MarketSymbol,
         interval: Interval,
-        prices: &[Candle],
+        prices: &[impl OHLCV],
     ) -> Result<u64> {
         if prices.is_empty() {
             return Ok(0);
@@ -289,27 +301,20 @@ impl Database {
             let mut tx = self.pool.begin().await?;
 
             let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT INTO OHLCV (symbol, exchange, timestamp, open, high, low, close, volume) ",
+                "INSERT OR REPLACE INTO OHLCV (symbol, exchange, interval, timestamp, open, high, low, close, volume) ",
             );
 
             query_builder.push_values(chunk, |mut b, price| {
-                b.push_bind(&ticker.symbol)
-                    .push_bind(&ticker.exchange)
+                b.push_bind(ticker.symbol())
+                    .push_bind(ticker.exchange())
                     .push_bind(interval.to_string())
-                    .push_bind(price.timestamp)
-                    .push_bind(price.open)
-                    .push_bind(price.high)
-                    .push_bind(price.low)
-                    .push_bind(price.close)
-                    .push_bind(price.volume);
+                    .push_bind(price.datetime())
+                    .push_bind(price.open())
+                    .push_bind(price.high())
+                    .push_bind(price.low())
+                    .push_bind(price.close())
+                    .push_bind(price.volume());
             });
-
-            query_builder.push(" ON CONFLICT(symbol, exchange, timestamp) DO UPDATE SET ");
-            query_builder.push("open = excluded.open, ");
-            query_builder.push("high = excluded.high, ");
-            query_builder.push("low = excluded.low, ");
-            query_builder.push("close = excluded.close, ");
-            query_builder.push("volume = excluded.volume");
 
             let query = query_builder.build();
             let result = query.execute(&mut *tx).await?;

@@ -1,6 +1,6 @@
 use crate::finance::{db::Database, models::Ticker};
 use std::str::FromStr;
-use tradingview::{Country, list_symbols};
+use tradingview::{Country, Interval, history, list_symbols};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ExchangeConfig {
@@ -44,6 +44,40 @@ pub async fn fetch_tickers(db: Database) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn fetch_prices(
+    db: Database,
+    ticker: &Ticker,
+    interval: Interval,
+    replay: bool,
+) -> anyhow::Result<()> {
+    // validate ticker
+    if ticker.symbol.is_empty() || ticker.exchange.is_empty() {
+        return Err(anyhow::anyhow!("Ticker symbol or exchange is empty"));
+    }
+    // Check if ticker already exists
+    let existing_ticker = db.get_ticker(&ticker.symbol, &ticker.exchange).await?;
+    if existing_ticker.is_none() {
+        return Err(anyhow::anyhow!(
+            "Ticker {} on exchange {} does not exist",
+            ticker.symbol,
+            ticker.exchange
+        ));
+    }
+
+    // Fetch historical prices
+    let query = history::single::retrieve()
+        .symbol(&ticker.symbol)
+        .exchange(&ticker.exchange)
+        .interval(interval)
+        .with_replay(replay);
+
+    let chart_data = query.call().await?;
+    // db.update_ticker(&chart_data.symbol_info).await?;
+    db.upsert_prices(ticker, interval, &chart_data.data).await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +92,24 @@ mod tests {
         let url = std::env::var("DATABASE_URL")?;
         let db = Database::new(&url).await?;
         fetch_tickers(db).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fetch_prices() -> anyhow::Result<()> {
+        dotenvy::dotenv().ok();
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .init();
+        let url = std::env::var("DATABASE_URL")?;
+        let db = Database::new(&url).await?;
+        let ticker = Ticker::builder()
+            .symbol("VCB".to_string())
+            .exchange("HOSE".to_string())
+            .build();
+
+        fetch_prices(db, &ticker, Interval::OneMinute, true).await?;
+
         Ok(())
     }
 }
