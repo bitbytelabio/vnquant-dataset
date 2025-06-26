@@ -52,6 +52,7 @@ impl From<IntervalArg> for Interval {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Fetch intraday prices for tickers from a file
     FetchPricesBatch {
         /// Database URL (can also be set via DATABASE_URL environment variable)
         #[arg(long, env = "DATABASE_URL")]
@@ -69,6 +70,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Fetch intraday prices for a batch of tickers from a file
     FetchIntradayPrices {
         /// Database URL (can also be set via DATABASE_URL environment variable)
         #[arg(long, env = "DATABASE_URL")]
@@ -96,6 +98,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Get TradingView token from cookies
     GetToken {
         #[arg(env = "TV_COOKIES")]
         cookies: Option<String>,
@@ -103,7 +106,8 @@ enum Commands {
         #[arg(short, long)]
         cookies_path: Option<String>,
     },
-    LoginTradingview {
+    /// Login to TradingView and save cookies
+    Login {
         /// Username for TradingView
         #[arg(short, long, env = "TV_USERNAME")]
         username: String,
@@ -425,7 +429,7 @@ async fn main() -> Result<()> {
                 duration.as_secs_f64()
             );
         }
-        Commands::LoginTradingview {
+        Commands::Login {
             username,
             password,
             totp_secret,
