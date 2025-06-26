@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tradingview::Interval;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Ticker {
     pub symbol: String,
     pub exchange: String,
@@ -12,12 +12,26 @@ pub struct Ticker {
     pub market_type: Option<String>,
     pub industry: Option<String>,
     pub sector: Option<String>,
-    pub founded: Option<i32>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub founded: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+impl From<tradingview::Symbol> for Ticker {
+    fn from(symbol: tradingview::Symbol) -> Self {
+        Self {
+            symbol: symbol.symbol,
+            exchange: symbol.exchange,
+            description: Some(symbol.description),
+            currency: Some(symbol.currency_code),
+            country: Some(symbol.country_code),
+            market_type: Some(symbol.market_type),
+            industry: None,
+            sector: None,
+            founded: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Candle {
     pub symbol: String,
     pub exchange: String,
@@ -28,10 +42,9 @@ pub struct Candle {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
-    pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, Default)]
 pub struct Indicator {
     pub symbol: String,
     pub exchange: String,
@@ -40,7 +53,6 @@ pub struct Indicator {
     pub indicator_type: String,
     pub value: Option<f64>,
     pub metadata: Option<String>,
-    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

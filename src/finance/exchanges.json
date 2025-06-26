@@ -1,0 +1,43 @@
+{
+  "exchanges": [
+    {
+      "exchange": "BINANCE"
+    },
+    {
+      "exchange": "PEPPERSTONE"
+    },
+    {
+      "exchange": "OKX"
+    },
+    {
+      "exchange": "HOSE",
+      "country": "VN"
+    },
+    {
+      "exchange": "UPCOM",
+      "country": "VN"
+    },
+    {
+      "exchange": "HNX",
+      "country": "VN"
+    },
+    {
+      "exchange": "NYSE",
+      "country": "US"
+    },
+    {
+      "exchange": "NASDAQ",
+      "country": "US"
+    },
+    {
+      "exchange": "AMEX",
+      "country": "US"
+    },
+    {
+      "exchange": "BYBIT"
+    },
+    {
+      "exchange": "TVC"
+    }
+  ]
+}
