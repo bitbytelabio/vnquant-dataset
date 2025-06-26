@@ -31,6 +31,31 @@ impl Database {
         Ok(())
     }
 
+    pub async fn get_ticker_by_symbol(&self, symbol: &str) -> Result<Option<Ticker>> {
+        let row = sqlx::query!(
+            "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded, created_at, updated_at FROM TICKERS WHERE symbol = ?",
+            symbol
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = row {
+            Ok(Some(Ticker {
+                symbol: row.symbol,
+                exchange: row.exchange,
+                description: row.description,
+                currency: row.currency,
+                country: row.country,
+                market_type: row.market_type,
+                industry: row.industry,
+                sector: row.sector,
+                founded: row.founded,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn get_ticker(&self, symbol: &str, exchange: &str) -> Result<Option<Ticker>> {
         let row = sqlx::query!(
             "SELECT symbol, exchange, description, currency, country, market_type, industry, sector, founded, created_at, updated_at FROM TICKERS WHERE symbol = ? AND exchange = ?",
