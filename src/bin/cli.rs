@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use tradingview::Interval;
+use tradingview::{Interval, UserCookies, get_quote_token};
 use vnquant_dataset::finance::{
     db::Database,
     models::Ticker,
@@ -49,6 +49,34 @@ impl From<IntervalArg> for Interval {
 
 #[derive(Subcommand)]
 enum Commands {
+    GetToken {
+        #[arg(env = "TV_COOKIES")]
+        cookies: Option<String>,
+
+        #[arg(short, long)]
+        cookies_path: Option<String>,
+    },
+    LoginTradingview {
+        /// Username for TradingView
+        #[arg(short, long, env = "TV_USERNAME")]
+        username: String,
+
+        /// Password for TradingView
+        #[arg(short, long, env = "TV_PASSWORD")]
+        password: String,
+
+        // optional TradingView token for 2FA
+        #[arg(short, long, env = "TV_TOTP_SECRET")]
+        totp_secret: Option<String>,
+
+        // path to save cookies
+        #[arg(short, long, default_value = "cookies.json")]
+        cookies_path: String,
+
+        /// Enable verbose logging
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Fetch tickers from TradingView exchanges
     FetchTickers {
         /// Database URL (can also be set via DATABASE_URL environment variable)
@@ -357,6 +385,65 @@ async fn main() -> Result<()> {
                 "✅ Successfully fetched intraday prices for all tickers in {:.2}s!",
                 duration.as_secs_f64()
             );
+        }
+        Commands::LoginTradingview {
+            username,
+            password,
+            totp_secret,
+            verbose,
+            cookies_path,
+        } => {
+            // Initialize logging
+            let log_level = if verbose {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
+
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+
+            let user = UserCookies::default()
+                .login(&username, &password, totp_secret.as_deref())
+                .await?;
+
+            // save cookies to file
+            serde_json::to_writer(std::fs::File::create(&cookies_path)?, &user)?;
+
+            if verbose {
+                println!("🔐 Successfully logged in to TradingView as {}", username);
+                println!(
+                    "Cookies saved to {}",
+                    std::fs::canonicalize(&cookies_path)?.display()
+                );
+            } else {
+                println!("🔐 Login successful. Cookies saved.");
+            }
+        }
+        Commands::GetToken {
+            cookies,
+            cookies_path,
+        } => {
+            // Load cookies from file or environment variable
+            let cookies = if let Some(path) = cookies_path {
+                std::fs::read_to_string(path)?
+            } else {
+                cookies.ok_or_else(|| {
+                    anyhow::anyhow!("No cookies provided. Please set TV_COOKIES environment variable or use --cookies-path option.")
+                })?
+            };
+
+            // Parse cookies JSON
+            let user: UserCookies = serde_json::from_str(&cookies)?;
+
+            let token = get_quote_token(&user).await?;
+
+            // Print the auth token
+            println!("{}", token);
+
+            // set TV_AUTH_TOKEN environment variable
+            unsafe {
+                std::env::set_var("TV_AUTH_TOKEN", &token);
+            }
         }
     }
 
