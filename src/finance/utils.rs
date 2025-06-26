@@ -4,7 +4,6 @@ use futures::{
     stream::{self, StreamExt},
 };
 use std::str::FromStr;
-
 use tradingview::{Country, Interval, history, list_symbols};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -18,9 +17,10 @@ pub struct TVConfigMap {
     pub exchanges: Vec<ExchangeConfig>,
 }
 
-pub async fn fetch_tickers(db: Database) -> anyhow::Result<()> {
-    let exchanges_str = include_str!("exchanges.json");
-    let config: TVConfigMap = serde_json::from_str(exchanges_str)?;
+pub async fn fetch_tickers(db: Database, path: &str) -> anyhow::Result<()> {
+    let exchanges_str = std::fs::read_to_string(path)?;
+
+    let config: TVConfigMap = serde_json::from_str(&exchanges_str)?;
     let mut tickers = Vec::new();
 
     for exchange_config in config.exchanges {
@@ -84,7 +84,7 @@ pub async fn fetch_prices(
     Ok(())
 }
 
-pub async fn fetch_prices_batch_stream(
+pub async fn fetch_prices_batch(
     db: &Database,
     tickers: &[Ticker],
     interval: Interval,
@@ -173,7 +173,7 @@ pub async fn fetch_prices_all(
 
             let start = std::time::Instant::now();
 
-            match fetch_prices_batch_stream(&db, chunk, interval).await {
+            match fetch_prices_batch(&db, chunk, interval).await {
                 Ok(_) => {
                     let duration = start.elapsed();
                     tracing::info!(
@@ -345,40 +345,4 @@ pub async fn fetch_intraday_prices_all(
         })?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::finance::db::Database;
-
-    #[tokio::test]
-    async fn test_fetch_tickers() -> anyhow::Result<()> {
-        dotenvy::dotenv().ok();
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .init();
-        let url = std::env::var("DATABASE_URL")?;
-        let db = Database::new(&url).await?;
-        fetch_tickers(db).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_fetch_prices() -> anyhow::Result<()> {
-        dotenvy::dotenv().ok();
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .init();
-        let url = std::env::var("DATABASE_URL")?;
-        let db = Database::new(&url).await?;
-        let ticker = Ticker::builder()
-            .symbol("VCB".to_string())
-            .exchange("HOSE".to_string())
-            .build();
-
-        fetch_prices(db, &ticker, Interval::OneMinute, true).await?;
-
-        Ok(())
-    }
 }

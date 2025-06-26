@@ -134,6 +134,10 @@ enum Commands {
         #[arg(long, env = "DATABASE_URL")]
         database_url: String,
 
+        /// Path to file containing TradingView exchanges configuration
+        #[arg(short, long, default_value = "exchanges.json")]
+        path: String,
+
         /// Enable verbose logging
         #[arg(short, long)]
         verbose: bool,
@@ -236,6 +240,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::FetchTickers {
             database_url,
+            path,
             verbose,
         } => {
             // Initialize logging
@@ -251,7 +256,7 @@ async fn main() -> Result<()> {
             let db = Database::new(&database_url).await?;
 
             println!("📈 Fetching tickers from exchanges...");
-            fetch_tickers(db).await?;
+            fetch_tickers(db, &path).await?;
 
             println!("✅ Successfully fetched and stored tickers!");
         }
