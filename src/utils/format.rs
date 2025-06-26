@@ -5,7 +5,7 @@ use arrow::{
 };
 use std::sync::Arc;
 
-pub fn ticker_arrow_schema() -> SchemaRef {
+pub fn ticker_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("symbol", DataType::Utf8, false),
         Field::new("exchange", DataType::Utf8, false),
@@ -20,8 +20,8 @@ pub fn ticker_arrow_schema() -> SchemaRef {
 }
 
 /// Convert Vec<Ticker> to Arrow RecordBatch
-pub fn to_record_batch(tickers: Vec<Ticker>) -> arrow::error::Result<RecordBatch> {
-    let schema = ticker_arrow_schema();
+pub fn to_batch(tickers: Vec<Ticker>) -> arrow::error::Result<RecordBatch> {
+    let schema = ticker_schema();
 
     let symbols: ArrayRef = Arc::new(StringArray::from(
         tickers
@@ -100,12 +100,12 @@ pub fn to_record_batch(tickers: Vec<Ticker>) -> arrow::error::Result<RecordBatch
 }
 
 /// Export tickers to Parquet file
-pub fn export_to_parquet(tickers: Vec<Ticker>, file_path: &str) -> anyhow::Result<()> {
+pub fn save_parquet(tickers: Vec<Ticker>, path: &str) -> anyhow::Result<()> {
     use parquet::arrow::ArrowWriter;
     use std::fs::File;
 
-    let batch = to_record_batch(tickers)?;
-    let file = File::create(file_path)?;
+    let batch = to_batch(tickers)?;
+    let file = File::create(path)?;
     let mut writer = ArrowWriter::try_new(file, batch.schema(), None)?;
 
     writer.write(&batch)?;
@@ -115,9 +115,9 @@ pub fn export_to_parquet(tickers: Vec<Ticker>, file_path: &str) -> anyhow::Resul
 }
 
 /// Export tickers in batches to Parquet (for large datasets)
-pub fn export_to_parquet_batched(
+pub fn save_parquet_batched(
     tickers: Vec<Ticker>,
-    file_path: &str,
+    path: &str,
     batch_size: usize,
 ) -> anyhow::Result<()> {
     use parquet::arrow::ArrowWriter;
@@ -127,12 +127,12 @@ pub fn export_to_parquet_batched(
         return Ok(());
     }
 
-    let schema = ticker_arrow_schema();
-    let file = File::create(file_path)?;
+    let schema = ticker_schema();
+    let file = File::create(path)?;
     let mut writer = ArrowWriter::try_new(file, schema, None)?;
 
     for chunk in tickers.chunks(batch_size) {
-        let batch = to_record_batch(chunk.to_vec())?;
+        let batch = to_batch(chunk.to_vec())?;
         writer.write(&batch)?;
     }
 
@@ -140,7 +140,7 @@ pub fn export_to_parquet_batched(
     Ok(())
 }
 
-pub fn from_record_batch(batch: &RecordBatch) -> anyhow::Result<Vec<Ticker>> {
+pub fn from_batch(batch: &RecordBatch) -> anyhow::Result<Vec<Ticker>> {
     use arrow::array::*;
 
     let symbols = batch
